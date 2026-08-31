@@ -9,6 +9,7 @@ from models.DNET import DNET
 from models.FNET import FNET
 import utils.utils as utils
 import models.submodules.homography as homography
+import models.submodules.homography_struct as homography_struct
 
 #change
 from models.submodules.geometry_gate import (
@@ -173,7 +174,7 @@ class STRUCTMAGNET(nn.Module):
         return list(k_list)
 
     #def forward(self, ref_img, nghbr_imgs, nghbr_poses, is_valid, cam_intrins, mode='train'):
-    def forward(self, ref_img, nghbr_imgs, nghbr_poses, is_valid, cam_intrins, mode='train', rot_unc=None, return_aux=False):
+    def forward(self,ref_img,nghbr_imgs,nghbr_poses,is_valid,cam_intrins,mode='train',rot_unc=None, rot_hyp_vec=None, return_aux=False):
         B = ref_img.shape[0]
 
         with torch.no_grad():
@@ -212,12 +213,20 @@ class STRUCTMAGNET(nn.Module):
 
             # Multi-view matching
             thres = int(self.weighting.split('CW')[1])
-            cost_volume = homography.est_costvolume_CW(
-                depth_volume, ref_feat_4, nghbr_feat_4,
-                ref_gmms, nghbr_gmms,
-                Rs_src, ts_src, is_valid, cam_intrins, thres
-            )
-
+            cost_volume = (homography_struct.est_costvolume_CW_marginalized(
+        depth_volume,
+        ref_feat_4,
+        nghbr_feat_4,
+        ref_gmms,
+        nghbr_gmms,
+        Rs_src,
+        ts_src,
+        is_valid,
+        cam_intrins,
+        thres,
+        rot_hyp_vec=rot_hyp_vec,
+    )
+)
             # G-Net forward pass
             # gnet_input = torch.cat([cost_volume.detach(), x_d3], dim=1)
             # new_pred = self.g_net(gnet_input, pred_list[-1].detach())
@@ -287,6 +296,7 @@ class STRUCTMAGNET(nn.Module):
                 "cost_entropy": entropy_list,
                 "cost_peak": peak_list,
                 "rot_unc": rot_unc,
+                "rot_hyp_vec": rot_hyp_vec,
                 "mono_gmm": ref_gmms,
             }
             return pred_list, aux

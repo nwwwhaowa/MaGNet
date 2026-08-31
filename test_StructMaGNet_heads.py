@@ -396,11 +396,14 @@ def main():
 
             # Stage-1: no pose perturbation yet.
             # Shape: B x V
+            
+            V = nghbr_poses.shape[1]
+            
             rot_unc = torch.zeros(
-                (batch_size, len(nghbr_dats)),
-                dtype=ref_img.dtype,
-                device=device,
-            )
+            batch_size,V,dtype=ref_img.dtype,device=device,)
+
+            rot_hyp_vec = torch.zeros(
+            batch_size,V,3,dtype=ref_img.dtype,device=device,)
 
             torch.cuda.synchronize()
             t0 = time.perf_counter()
@@ -412,6 +415,7 @@ def main():
                 is_valid,
                 cam_intrins,
                 rot_unc=rot_unc,
+                rot_hyp_vec=rot_hyp_vec,
                 mode="test",
                 return_aux=True,
             )
@@ -425,13 +429,31 @@ def main():
             ):
                 raise RuntimeError(
                     "STRUCTMAGNET(return_aux=True) must return "
-                    "(pred_list, aux). "
-                    "Please finish the return_aux branch in STRUCTMAGNET.py first."
+                    "(pred_list, aux)."
                 )
 
             pred_list, aux = model_out
 
             pred, stdev = torch.split(pred_list[-1], 1, dim=1)
+
+            gate_mean = (
+            aux["geometry_gate"][-1]
+            .detach()
+            .mean()
+            .item()
+            )
+
+            # Prefer the value returned by the model when available.
+            # Fall back to the test input so this script also works when
+            # STRUCTMAGNET.py does not expose rot_hyp_vec in aux yet.
+            rot_hyp_out = aux.get("rot_hyp_vec", rot_hyp_vec)
+            rot_hyp_norm = (
+                rot_hyp_out
+                .detach()
+                .norm(dim=-1)
+                .mean()
+                .item()
+            )
 
             geometry_gate = _last_aux(aux, "geometry_gate")
             cost_entropy = _last_aux(aux, "cost_entropy")
@@ -488,6 +510,7 @@ def main():
                 f"AbsRel={cur_metrics['abs_rel']:.4f} "
                 f"a1={cur_metrics['a1']:.4f} "
                 f"gate={gate_mean:.4f} "
+                f"rot_hyp_norm={rot_hyp_norm:.6f} "
                 f"forward={forward_times[-1] * 1000:.1f} ms"
             )
 
