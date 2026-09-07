@@ -1,4 +1,3 @@
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,119 +6,80 @@ import numpy as np
 
 from models.DNET import DNET
 from models.FNET import FNET
-import utils.utils as utils
 import models.submodules.homography as homography
-import models.submodules.homography_struct as homography_struct
-
-#change
 from models.submodules.geometry_gate import (
     GeometryGate,
     cost_volume_statistics,
     rotation_uncertainty_map,
 )
 
-# upsample coarse depth map via learned upsampling
+
 def upsample_depth_via_mask(depth, up_mask, k):
-    # depth: low-resolution depth (B, 2, H, W)
-    # up_mask: (B, 9*k*k, H, W)
+    """Learned convex upsampling used by the original MaGNet."""
     N, o_dim, H, W = depth.shape
     up_mask = up_mask.view(N, 1, 9, k, k, H, W)
-    up_mask = torch.softmax(up_mask, dim=2)             # (B, 1, 9, k, k, H, W)
+    up_mask = torch.softmax(up_mask, dim=2)
 
-    up_depth = F.unfold(depth, [3, 3], padding=1)       # (B, 2, H, W) -> (B, 2 X 3*3, H*W)
-    up_depth = up_depth.view(N, o_dim, 9, 1, 1, H, W)   # (B, 2, 3*3, 1, 1, H, W)
-    up_depth = torch.sum(up_mask * up_depth, dim=2)     # (B, 2, k, k, H, W)
+    up_depth = F.unfold(depth, [3, 3], padding=1)
+    up_depth = up_depth.view(N, o_dim, 9, 1, 1, H, W)
+    up_depth = torch.sum(up_mask * up_depth, dim=2)
 
-    up_depth = up_depth.permute(0, 1, 4, 2, 5, 3)       # (B, 2, H, k, W, k)
-    return up_depth.reshape(N, o_dim, k*H, k*W)         # (B, 2, kH, kW)
+    up_depth = up_depth.permute(0, 1, 4, 2, 5, 3)
+    return up_depth.reshape(N, o_dim, k * H, k * W)
 
 
-# load checkpoint
 def load_checkpoint(fpath, model):
+    """Strict loader used for the original D-Net/F-Net checkpoints."""
     ckpt = torch.load(fpath, map_location='cpu')
     if 'model' in ckpt:
         ckpt = ckpt['model']
+
     load_dict = {}
     for k, v in ckpt.items():
         if k.startswith('module.'):
-            k_ = k.replace('module.', '')
-            load_dict[k_] = v
-        else:
-            load_dict[k] = v
+            k = k[len('module.'):]
+        load_dict[k] = v
+
     model.load_state_dict(load_dict)
     return model
 
 
-# GNET
 class GNET(nn.Module):
-
     def __init__(self, ch_in, ch_out=2):
-        super(GNET, self).__init__()
+        super().__init__()
         h_dim = 128
         self.gnet = nn.Sequential(
-            nn.Conv2d(ch_in, h_dim, 3, padding=1), nn.ReLU(inplace=True),
-            nn.Conv2d(h_dim, h_dim, 1), nn.ReLU(inplace=True),
-            nn.Conv2d(h_dim, h_dim, 1), nn.ReLU(inplace=True),
-            nn.Conv2d(h_dim, ch_out, 1)
+            nn.Conv2d(ch_in, h_dim, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(h_dim, h_dim, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(h_dim, h_dim, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(h_dim, ch_out, 1),
         )
+
+    def predict_params(self, cost_volume):
+        """Return original MaGNet normalized mean residual and sigma scale."""
+        d_output = self.gnet(cost_volume)
+        mu_res, sigma_raw = torch.split(d_output, 1, dim=1)
+        sigma_scale = F.elu(sigma_raw) + 1.0 + 1e-10
+        return mu_res, sigma_scale
 
     def forward(self, cost_volume, ref_gmm):
         mu_0, sigma_0 = torch.split(ref_gmm, 1, dim=1)
-
         mu_res, sigma_scale = self.predict_params(cost_volume)
-
         mu_new = mu_0 + mu_res * sigma_0
         sigma_new = sigma_scale * sigma_0
-
-        mv_gmm = torch.cat([mu_new, sigma_new],dim=1,)
-        return mv_gmm
-
-    # def forward(self, cost_volume, ref_gmm):
-    #     # ref_gmm: initial prediction (N, 2, H, W)
-    #     mu_0, sigma_0 = torch.split(ref_gmm, 1, dim=1)
-
-    #     # mu_1:     (mu_new - mu_0) / sigma_0
-    #     # sigma_1:  sigma_new / sigma_0
-    #     d_output = self.gnet(cost_volume)
-    #     mu_1, sigma_1 = torch.split(d_output, 1, dim=1)
-
-    #     mu_new = mu_0 + (mu_1 * sigma_0)
-    #     sigma_new = (F.elu(sigma_1) + 1.0 + 1e-10) * sigma_0
-    #     mv_gmm = torch.cat([mu_new, sigma_new], dim=1)                        # B, 3 x N_c, H, W
-    #     return mv_gmm
-    
-    #change
-    def predict_params(self, cost_volume):
-        """
-         Returns:
-        mu_res:
-            normalized mean residual
-
-        sigma_scale:
-            positive multiplicative sigma scale
-        """
-        d_output = self.gnet(cost_volume)
-
-        mu_res, sigma_raw = torch.split(
-        d_output,
-        1,
-        dim=1,
-         )
-
-        sigma_scale = (
-        F.elu(sigma_raw)
-        + 1.0
-        + 1e-10
-        )
-        return mu_res, sigma_scale
+        return torch.cat([mu_new, sigma_new], dim=1)
 
 
 class STRUCTMAGNET(nn.Module):
+    """Stage-1 StructMaGNet: original MaGNet + GeometryGate."""
+
     def __init__(self, args):
-        super(STRUCTMAGNET, self).__init__()
+        super().__init__()
         self.args = args
 
-        # load DNET
         print('loading DNET...{}'.format(args.DNET_ckpt))
         self.d_net = DNET(args, dnet=False)
         self.d_net = load_checkpoint(args.DNET_ckpt, self.d_net)
@@ -127,7 +87,6 @@ class STRUCTMAGNET(nn.Module):
             param.requires_grad = False
         self.d_net.eval()
 
-        # load FNET
         print('loading FNET... {}'.format(args.FNET_ckpt))
         self.f_net = FNET(args)
         self.f_net = load_checkpoint(args.FNET_ckpt, self.f_net)
@@ -135,119 +94,182 @@ class STRUCTMAGNET(nn.Module):
             param.requires_grad = False
         self.f_net.eval()
 
-        # hyperparameters
-        self.sampling_range = args.MAGNET_sampling_range        # beta in paper / defines the sampling range
-        self.n_samples = args.MAGNET_num_samples                # N_s in paper / number of samples
-        self.weighting = args.MAGNET_mvs_weighting              # If it is "CW5", it means "use consistency weighting and set kappa to 5"
-        self.train_iter = args.MAGNET_num_train_iter            # N_iter during training
-        self.test_iter = args.MAGNET_num_test_iter              # N_iter during testing
-        self.dpv_height = args.dpv_height                       # height of the cost volume (1/4 of the original height)
-        self.dpv_width = args.dpv_width                         # width of the cost volume (1/4 of the original width)
-
+        self.sampling_range = args.MAGNET_sampling_range
+        self.n_samples = args.MAGNET_num_samples
+        self.weighting = args.MAGNET_mvs_weighting
+        self.train_iter = args.MAGNET_num_train_iter
+        self.test_iter = args.MAGNET_num_test_iter
+        self.dpv_height = args.dpv_height
+        self.dpv_width = args.dpv_width
         self.k_list = self.depth_sampling()
         self.downsample_ratio = args.downsample_ratio
 
-        # GNet
         dnet_fdim = 256
-        self.g_net = GNET(ch_in=dnet_fdim + self.n_samples, ch_out=2)
-        
-        #change
-        self.geometry_gate = GeometryGate(ch_in=4, hidden_dim=32)
-        # Learned upsampling
+        self.g_net = GNET(
+            ch_in=dnet_fdim + self.n_samples,
+            ch_out=2,
+        )
+
+        self.geometry_gate = GeometryGate(
+            ch_in=4,
+            hidden_dim=32,
+        )
+
         h_dim = 128
         self.mask_head = nn.Sequential(
-            nn.Conv2d(dnet_fdim, h_dim, 3, padding=1), nn.ReLU(inplace=True),
-            nn.Conv2d(h_dim, h_dim, 1), nn.ReLU(inplace=True),
-            nn.Conv2d(h_dim, h_dim, 1), nn.ReLU(inplace=True),
-            nn.Conv2d(h_dim, 9 * self.downsample_ratio * self.downsample_ratio, 1)
+            nn.Conv2d(dnet_fdim, h_dim, 3, padding=1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(h_dim, h_dim, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(h_dim, h_dim, 1),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(
+                h_dim,
+                9 * self.downsample_ratio * self.downsample_ratio,
+                1,
+            ),
         )
         self.upsample_depth = upsample_depth_via_mask
 
     def depth_sampling(self):
         from scipy.special import erf
         from scipy.stats import norm
-        P_total = erf(self.sampling_range / np.sqrt(2))             # Probability covered by the sampling range
+
+        p_total = erf(self.sampling_range / np.sqrt(2))
         idx_list = np.arange(0, self.n_samples + 1)
-        p_list = (1 - P_total)/2 + ((idx_list/self.n_samples) * P_total)
+        p_list = (
+            (1 - p_total) / 2
+            + ((idx_list / self.n_samples) * p_total)
+        )
         k_list = norm.ppf(p_list)
-        k_list = (k_list[1:] + k_list[:-1])/2
+        k_list = (k_list[1:] + k_list[:-1]) / 2
         return list(k_list)
 
-    #def forward(self, ref_img, nghbr_imgs, nghbr_poses, is_valid, cam_intrins, mode='train'):
-    def forward(self,ref_img,nghbr_imgs,nghbr_poses,is_valid,cam_intrins,mode='train',rot_unc=None, rot_hyp_vec=None, return_aux=False):
+    def forward(
+        self,
+        ref_img,
+        nghbr_imgs,
+        nghbr_poses,
+        is_valid,
+        cam_intrins,
+        mode='train',
+        rot_unc=None,
+        return_aux=False,
+    ):
         B = ref_img.shape[0]
 
+        # D-Net/F-Net remain frozen in Stage-1.
         with torch.no_grad():
-            # D-Net forward pass
-            mono_gmms, x_d3 = self.d_net(torch.cat((ref_img, nghbr_imgs), dim=0))     # N+NxV x 2 x H/4 x W/4
+            mono_gmms, x_d3 = self.d_net(
+                torch.cat((ref_img, nghbr_imgs), dim=0)
+            )
             mono_gmms = mono_gmms.detach()
+
             ref_gmms = mono_gmms[:B, ...]
-            # ref_gmms has shape [B, 2, H/4, W/4] = [mu, sigma].
-            # torch.split returns a tuple, so unpack it explicitly.
             _, mono_sigma = torch.split(ref_gmms, 1, dim=1)
             mono_sigma = mono_sigma.detach()
 
-            x_d3 = x_d3[:B, ...]
+            x_d3 = x_d3[:B, ...].detach()
             nghbr_gmms = mono_gmms[B:, ...]
 
-            # F-Net forward pass
-            feat_4 = self.f_net(torch.cat((ref_img, nghbr_imgs), dim=0))
-            ref_feat_4 = feat_4[:B, ...]
-            nghbr_feat_4 = feat_4[B:, ...]
+            feat_4 = self.f_net(
+                torch.cat((ref_img, nghbr_imgs), dim=0)
+            )
+            ref_feat_4 = feat_4[:B, ...].detach()
+            nghbr_feat_4 = feat_4[B:, ...].detach()
 
-        # Multi-view matching
-        Rs_src = nghbr_poses[:, :, :3, :3]                                 # N, V, 3, 3
-        ts_src = nghbr_poses[:, :, :3, 3]                                  # N, V, 3
+        Rs_src = nghbr_poses[:, :, :3, :3]
+        ts_src = nghbr_poses[:, :, :3, 3]
 
-        pred_list = [ref_gmms]
-        #change
+        # Keep the initial monocular Gaussian at index 0, matching MaGNet.
+        pred_low_list = [ref_gmms]
         gate_list = []
         entropy_list = []
         peak_list = []
-        for itr in range(self.train_iter) if mode == 'train' else range(self.test_iter):
+        ungated_gmm_list = []
 
-            # Depth sampling
-            ref_mu, ref_sigma = torch.split(pred_list[-1].detach(), 1, dim=1)   # B, 1, H, W
-            depth_volume = [ref_mu + ref_sigma * k for k in self.k_list]
-            depth_volume = torch.cat(depth_volume, dim=1)                       # B, N_samples, H, W
+        n_iter = self.train_iter if mode == 'train' else self.test_iter
 
-            # Multi-view matching
+        for _ in range(n_iter):
+            ref_mu, ref_sigma = torch.split(
+                pred_low_list[-1].detach(),
+                1,
+                dim=1,
+            )
+
+            depth_volume = [
+                ref_mu + ref_sigma * k
+                for k in self.k_list
+            ]
+            depth_volume = torch.cat(depth_volume, dim=1)
+
             thres = int(self.weighting.split('CW')[1])
-            cost_volume = (homography_struct.est_costvolume_CW_marginalized(
-        depth_volume,
-        ref_feat_4,
-        nghbr_feat_4,
-        ref_gmms,
-        nghbr_gmms,
-        Rs_src,
-        ts_src,
-        is_valid,
-        cam_intrins,
-        thres,
-        rot_hyp_vec=rot_hyp_vec,
-    )
-)
-            # G-Net forward pass
-            # gnet_input = torch.cat([cost_volume.detach(), x_d3], dim=1)
-            # new_pred = self.g_net(gnet_input, pred_list[-1].detach())
-            # pred_list.append(new_pred)
-            gnet_input = torch.cat([cost_volume.detach(), x_d3], dim=1)
+            cost_volume = homography.est_costvolume_CW(
+                depth_volume,
+                ref_feat_4,
+                nghbr_feat_4,
+                ref_gmms,
+                nghbr_gmms,
+                Rs_src,
+                ts_src,
+                is_valid,
+                cam_intrins,
+                thres,
+            )
 
-            # Original MaGNet update parameters
-            prev_gmm = pred_list[-1].detach()
-            prev_mu, prev_sigma = torch.split(prev_gmm, 1, dim=1)
-            mu_res, sigma_scale = (self.g_net.predict_params(gnet_input))
-            
-            # Geometry reliability statistics
-            cost_entropy, cost_peak = (cost_volume_statistics(cost_volume.detach()))
+            # Some 7-Scenes warps can yield non-finite matching values
+            # near invalid/out-of-view projections. Prevent those values
+            # from contaminating G-Net or GeometryGate.
+            cost_volume_safe = torch.nan_to_num(
+                cost_volume.detach(),
+                nan=0.0,
+                posinf=20.0,
+                neginf=-20.0,
+            )
+
+            gnet_input = torch.cat(
+                [cost_volume_safe, x_d3],
+                dim=1,
+            )
+            gnet_input = torch.nan_to_num(
+                gnet_input,
+                nan=0.0,
+                posinf=20.0,
+                neginf=-20.0,
+            )
+
+            prev_gmm = pred_low_list[-1].detach()
+            prev_mu, prev_sigma = torch.split(
+                prev_gmm,
+                1,
+                dim=1,
+            )
+
+            # Frozen original MaGNet proposal.
+            mu_res, sigma_scale = self.g_net.predict_params(
+                gnet_input
+            )
+
+            raw_mu = prev_mu + mu_res * prev_sigma
+            raw_sigma = sigma_scale * prev_sigma
+            raw_mv_gmm = torch.cat(
+                [raw_mu, raw_sigma],
+                dim=1,
+            )
+
+            cost_entropy, cost_peak = cost_volume_statistics(
+                cost_volume_safe
+            )
+
             rot_unc_map = rotation_uncertainty_map(
                 rot_unc=rot_unc,
                 batch_size=B,
                 height=cost_volume.shape[2],
                 width=cost_volume.shape[3],
                 device=cost_volume.device,
-                dtype=cost_volume.dtype,)
-            
+                dtype=cost_volume.dtype,
+            )
+
             gate_input = torch.cat(
                 [
                     cost_entropy,
@@ -255,24 +277,34 @@ class STRUCTMAGNET(nn.Module):
                     mono_sigma,
                     rot_unc_map,
                 ],
-                dim=1,)
+                dim=1,
+            )
+            gate_input = torch.nan_to_num(
+                gate_input,
+                nan=0.0,
+                posinf=20.0,
+                neginf=-20.0,
+            )
+
             g_geo = self.geometry_gate(gate_input)
 
+            # GeometryGate is probability-valued. Keep it finite and away
+            # from exact 0/1 for numerically stable BCE supervision.
+            g_geo = torch.nan_to_num(
+                g_geo,
+                nan=0.5,
+                posinf=1.0,
+                neginf=0.0,
+            ).clamp(1e-6, 1.0 - 1e-6)
+
             # Reliability-aware Gaussian update.
-            # IMPORTANT: this update must stay INSIDE the MaGNet iteration loop,
-            # otherwise test_iter=3 would compute the cost volume three times
-            # but update the depth distribution only once.
             mu_new = (
                 prev_mu
                 + g_geo * mu_res * prev_sigma
             )
-
-            sigma_new = (
-                prev_sigma
-                * (
-                    (1.0 - g_geo)
-                    + g_geo * sigma_scale
-                )
+            sigma_new = prev_sigma * (
+                (1.0 - g_geo)
+                + g_geo * sigma_scale
             )
 
             new_pred = torch.cat(
@@ -280,54 +312,71 @@ class STRUCTMAGNET(nn.Module):
                 dim=1,
             )
 
-            pred_list.append(new_pred)
-
+            # IMPORTANT: append INSIDE the iterative refinement loop.
+            pred_low_list.append(new_pred)
             gate_list.append(g_geo)
             entropy_list.append(cost_entropy)
             peak_list.append(cost_peak)
+            ungated_gmm_list.append(raw_mv_gmm.detach())
 
-        # Upsampling
         mask = self.mask_head(x_d3)
-        pred_list = [self.upsample_depth(pred, mask, self.downsample_ratio) for pred in pred_list[1:]]
+        pred_list = [
+            self.upsample_depth(
+                pred,
+                mask,
+                self.downsample_ratio,
+            )
+            for pred in pred_low_list[1:]
+        ]
 
         if return_aux:
             aux = {
-                "geometry_gate": gate_list,
-                "cost_entropy": entropy_list,
-                "cost_peak": peak_list,
-                "rot_unc": rot_unc,
-                "rot_hyp_vec": rot_hyp_vec,
-                "mono_gmm": ref_gmms,
+                'geometry_gate': gate_list,
+                'cost_entropy': entropy_list,
+                'cost_peak': peak_list,
+                'rot_unc': rot_unc,
+                'mono_gmm': ref_gmms,
+                # Original MaGNet proposal before GeometryGate at each iteration.
+                'ungated_gmm': ungated_gmm_list,
+                # Useful for debugging / future losses.
+                'gated_gmm_lowres': pred_low_list[1:],
             }
             return pred_list, aux
-        
+
         return pred_list
 
 
-# When training F-Net
 class MAGNET_F(nn.Module):
     def __init__(self, args):
-        super(MAGNET_F, self).__init__()
+        super().__init__()
         self.f_net = FNET(args)
 
-    def forward(self, ref_img, nghbr_imgs, nghbr_poses, is_valid, cam_intrins, d_center):
+    def forward(
+        self,
+        ref_img,
+        nghbr_imgs,
+        nghbr_poses,
+        is_valid,
+        cam_intrins,
+        d_center,
+    ):
         B = ref_img.shape[0]
 
-        # F-Net forward pass
-        feat_4 = self.f_net(torch.cat((ref_img, nghbr_imgs), dim=0))
-        ref_feat_4 = feat_4[:B, ...]                                       # N   x F x H/4 x W/4
-        nghbr_feat_4 = feat_4[B:, ...]                                     # NxV x F x H/4 x W/4
-
-        # DP-Net forward pass
-        Rs_src = nghbr_poses[:, :, :3, :3]                                 # N, V, 3, 3
-        ts_src = nghbr_poses[:, :, :3, 3]                                  # N, V, 3
-
-        # Cost-volume computation
-        cost_volume = homography.est_costvolume_F(
-            d_center, ref_feat_4, nghbr_feat_4,
-            Rs_src, ts_src, is_valid, cam_intrins
+        feat_4 = self.f_net(
+            torch.cat((ref_img, nghbr_imgs), dim=0)
         )
+        ref_feat_4 = feat_4[:B, ...]
+        nghbr_feat_4 = feat_4[B:, ...]
 
-        return cost_volume
+        Rs_src = nghbr_poses[:, :, :3, :3]
+        ts_src = nghbr_poses[:, :, :3, 3]
 
-
+        return homography.est_costvolume_F(
+            d_center,
+            ref_feat_4,
+            nghbr_feat_4,
+            Rs_src,
+            ts_src,
+            is_valid,
+            cam_intrins,
+        )

@@ -8,7 +8,7 @@ class Encoder(nn.Module):
     def __init__(self):
         super(Encoder, self).__init__()
         basemodel_name = 'tf_efficientnet_b5_ap'
-        basemodel = torch.hub.load('rwightman/gen-efficientnet-pytorch', basemodel_name, pretrained=True)
+        basemodel = torch.hub.load('rwightman/gen-efficientnet-pytorch:master', basemodel_name, pretrained=True)
         # Remove last layer
         basemodel.global_pool = nn.Identity()
         basemodel.classifier = nn.Identity()
