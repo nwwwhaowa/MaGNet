@@ -1,0 +1,13 @@
+
+# Local training artifacts
+ckpts/
+exp/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Backup/local configs
+*.bak
+*.bak_*
+*_local.txt

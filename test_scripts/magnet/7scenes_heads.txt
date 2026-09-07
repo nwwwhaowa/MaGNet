@@ -1,0 +1,19 @@
+# Reference values matching the official MaGNet 7-Scenes test configuration.
+# This file is documentary for now; test_MaGNet_heads.py uses normal CLI args.
+--dataset_name 7scenes
+--dataset_path ~/26workspace/datasets/SevenScenes/heads
+--DNET_ckpt ./ckpts/DNET_scannet.pt
+--FNET_ckpt ./ckpts/FNET_scannet.pt
+--MAGNET_ckpt ./ckpts/MAGNET_scannet.pt
+--MAGNET_sampling_range 3
+--MAGNET_num_samples 5
+--MAGNET_mvs_weighting CW5
+--MAGNET_num_test_iter 3
+--MAGNET_window_radius 20
+--MAGNET_num_source_views 4
+--input_height 480
+--input_width 640
+--dpv_height 120
+--dpv_width 160
+--min_depth 1e-3
+--max_depth 10.0
