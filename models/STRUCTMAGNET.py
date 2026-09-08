@@ -61,7 +61,8 @@ class GNET(nn.Module):
     def predict_params(self, cost_volume):
         """Return original MaGNet normalized mean residual and sigma scale."""
         d_output = self.gnet(cost_volume)
-        mu_res, sigma_raw = torch.split(d_output, 1, dim=1)
+        # Gaussian parameter arithmetic stays FP32 under autocast.
+        mu_res, sigma_raw = torch.split(d_output.float(), 1, dim=1)
         sigma_scale = F.elu(sigma_raw) + 1.0 + 1e-10
         return mu_res, sigma_scale
 
@@ -163,7 +164,7 @@ class STRUCTMAGNET(nn.Module):
             mono_gmms, x_d3 = self.d_net(
                 torch.cat((ref_img, nghbr_imgs), dim=0)
             )
-            mono_gmms = mono_gmms.detach()
+            mono_gmms = mono_gmms.detach().float()
 
             ref_gmms = mono_gmms[:B, ...]
             _, mono_sigma = torch.split(ref_gmms, 1, dim=1)
@@ -187,6 +188,10 @@ class STRUCTMAGNET(nn.Module):
         entropy_list = []
         peak_list = []
         ungated_gmm_list = []
+        geometry_valid_list = []
+        # Frame-level pose availability. Per-pixel visibility/occlusion support
+        # remains a separate future matching change; a flat cost is not a mask.
+        has_source = is_valid.to(ref_gmms.device).eq(1).any(dim=1).view(B, 1, 1, 1)
 
         n_iter = self.train_iter if mode == 'train' else self.test_iter
 
@@ -288,24 +293,21 @@ class STRUCTMAGNET(nn.Module):
 
             g_geo = self.geometry_gate(gate_input)
 
-            # GeometryGate is probability-valued. Keep it finite and away
-            # from exact 0/1 for numerically stable BCE supervision.
-            g_geo = torch.nan_to_num(
-                g_geo,
-                nan=0.5,
-                posinf=1.0,
-                neginf=0.0,
-            ).clamp(1e-6, 1.0 - 1e-6)
-
-            # Reliability-aware Gaussian update.
-            mu_new = (
-                prev_mu
-                + g_geo * mu_res * prev_sigma
-            )
-            sigma_new = prev_sigma * (
-                (1.0 - g_geo)
-                + g_geo * sigma_scale
-            )
+            # Smooth-L1 does not require clipping away from 0/1. Do not hide
+            # non-finite gate outputs: the shared oracle checker reports them.
+            g_geo = g_geo.float()
+            geometry_valid = (has_source
+                              & torch.isfinite(cost_volume).all(dim=1, keepdim=True)
+                              & torch.isfinite(raw_mv_gmm).all(dim=1, keepdim=True)
+                              & (raw_sigma > 0))
+            g_geo = torch.where(geometry_valid, g_geo, torch.zeros_like(g_geo))
+            # Sanitize invalid proposals BEFORE multiplication: 0*NaN is NaN.
+            safe_mu = torch.where(geometry_valid, raw_mu, prev_mu)
+            safe_sigma = torch.where(geometry_valid, raw_sigma, prev_sigma)
+            mu_new = prev_mu + g_geo * (safe_mu - prev_mu)
+            # Convex form avoids cancellation to zero when g==1 and the
+            # proposal sigma is tiny but positive (common with saturated AMP gates).
+            sigma_new = (1.0 - g_geo) * prev_sigma + g_geo * safe_sigma
 
             new_pred = torch.cat(
                 [mu_new, sigma_new],
@@ -318,6 +320,7 @@ class STRUCTMAGNET(nn.Module):
             entropy_list.append(cost_entropy)
             peak_list.append(cost_peak)
             ungated_gmm_list.append(raw_mv_gmm.detach())
+            geometry_valid_list.append(geometry_valid.detach())
 
         mask = self.mask_head(x_d3)
         pred_list = [
@@ -338,6 +341,7 @@ class STRUCTMAGNET(nn.Module):
                 'mono_gmm': ref_gmms,
                 # Original MaGNet proposal before GeometryGate at each iteration.
                 'ungated_gmm': ungated_gmm_list,
+                'geometry_valid': geometry_valid_list,
                 # Useful for debugging / future losses.
                 'gated_gmm_lowres': pred_low_list[1:],
             }

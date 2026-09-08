@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 import torch
 from PIL import Image
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchvision import transforms
 
 
@@ -445,6 +445,33 @@ class SevenScenesTrainDataset(Dataset):
         return data_array, self.cam_intrins
 
 
+def balanced_validation_indices(samples, limit):
+    """Deterministic scene-balanced subset, spread over each held-out sequence.
+
+    Taking the first 32 entries of the scene-sorted list evaluates only Chess.
+    Round-robin allocation covers every scene; evenly spaced indices reduce
+    the near-duplicate temporal prefix in the previous smoke validation.
+    """
+    if limit <= 0 or limit >= len(samples):
+        return list(range(len(samples)))
+    groups = {}
+    for i, (scene, _, _) in enumerate(samples):
+        groups.setdefault(scene, []).append(i)
+    if limit < len(groups):
+        raise ValueError('val_max_samples must cover at least one frame per scene')
+    counts = dict.fromkeys(groups, 0)
+    for _ in range(limit):
+        candidates = [key for key in groups if counts[key] < len(groups[key])]
+        key = min(candidates, key=lambda key: counts[key])
+        counts[key] += 1
+    selected = {}
+    for key, indices in groups.items():
+        positions = np.linspace(0, len(indices)-1, counts[key], dtype=int)
+        selected[key] = [indices[j] for j in positions]
+    return [selected[key][j] for j in range(max(counts.values()))
+            for key in groups if j < counts[key]]
+
+
 class SevenScenesTrainLoader:
     def __init__(self, args, mode: str):
         dataset = SevenScenesTrainDataset(
@@ -465,6 +492,10 @@ class SevenScenesTrainLoader:
         )
 
         self.t_samples = dataset
+
+        limit = int(getattr(args, 'val_max_samples', 0))
+        if mode == 'val' and limit > 0:
+            dataset = Subset(dataset, balanced_validation_indices(dataset.samples, limit))
 
         self.data = DataLoader(
             dataset,

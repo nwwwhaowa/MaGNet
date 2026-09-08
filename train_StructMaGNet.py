@@ -8,9 +8,10 @@ Stage goal:
     - Preserve translation exactly.
     - Supervise the gate by multi-view utility:
 
-        y_g = sigmoid((e_mono - e_mv) / tau)
+        g_star = clamp((gt - mu_mono) / (mu_mv - mu_mono), 0, 1)
 
-      where e_mv is computed from the frozen ungated MaGNet proposal.
+      on identifiable pixels, using only the first frozen ungated proposal.
+      Optimize Smooth-L1 on gate[0]; depth NLL is diagnostic only.
     - Validate at fixed 0 deg, 5 deg and 8 deg rotation perturbations.
 - Report Gate iteration diagnostics and oracle-target alignment.
 - Support --eval_only to diagnose an existing gate checkpoint without training.
@@ -58,7 +59,7 @@ sys.path.insert(0, str(_REPO_ROOT))
 import utils.utils as utils
 from data.dataloader_7scenes_train import SevenScenesTrainLoader
 from models.STRUCTMAGNET import STRUCTMAGNET
-from utils.losses import MagnetLoss
+from utils.gate_oracle import first_gate_oracle, oracle_loss, OracleAccumulator
 
 
 def build_model_args(cli):
@@ -141,9 +142,15 @@ def load_compatible_backbone(checkpoint_path, model):
         key: value
         for key, value in ckpt.items()
         if key in current
+        and not key.startswith('geometry_gate.')
         and current[key].shape == value.shape
     }
 
+    required = [key for key in current if key.startswith(('g_net.', 'mask_head.'))]
+    missing = [key for key in required if key not in compatible]
+    if missing:
+        raise RuntimeError('Incomplete MaGNet backbone checkpoint: missing or '
+                           'shape-mismatched G-Net/upsampling tensors: ' + ', '.join(missing))
     result = model.load_state_dict(compatible, strict=False)
     print(f'loaded original MaGNet tensors: {len(compatible)}')
     print(f'missing tensors after partial load: {len(result.missing_keys)}')
@@ -331,95 +338,11 @@ def last_aux_tensor(aux, key):
 
 
 def compute_gate_oracle_diagnostics(aux, gt_depth, args):
-    """Compute Phase-A oracle diagnostics for the supervised first gate.
-
-    The Phase-A loss supervises geometry_gate[0] against the optimal
-    interpolation coefficient between the frozen monocular prediction and
-    the first frozen ungated multi-view proposal. This helper evaluates the
-    same target during validation and reports how well gate[0] follows it.
-    """
-    gates = aux.get('geometry_gate')
-    ungated = aux.get('ungated_gmm')
-    mono_gmm = aux.get('mono_gmm')
-
-    if not isinstance(gates, (list, tuple)) or not gates:
-        raise RuntimeError('aux[geometry_gate] must be a non-empty list')
-    if not isinstance(ungated, (list, tuple)) or not ungated:
-        raise RuntimeError('aux[ungated_gmm] must be a non-empty list')
-    if mono_gmm is None:
-        raise RuntimeError('aux[mono_gmm] is required')
-
-    gate1 = gates[0]
-    raw_mv = ungated[0]
-
-    mono_mu = mono_gmm[:, :1].detach()
-    raw_mv_mu = raw_mv[:, :1].detach()
-
-    gt_low = F.interpolate(
-        gt_depth,
-        size=gate1.shape[-2:],
-        mode='nearest',
-    )
-
-    delta = raw_mv_mu - mono_mu
-    valid = (
-        (gt_low > args.min_depth)
-        & (gt_low < args.max_depth)
-        & torch.isfinite(gt_low)
-        & torch.isfinite(mono_mu)
-        & torch.isfinite(raw_mv_mu)
-        & torch.isfinite(gate1)
-        & (torch.abs(delta) > args.gate_min_delta)
-    )
-
-    if not torch.any(valid):
-        return {
-            'target_mean': float('nan'),
-            'target_std': float('nan'),
-            'mae': float('nan'),
-            'corr': float('nan'),
-            'valid_pixels': 0,
-        }
-
-    numerator = (gt_low - mono_mu) * delta
-    denominator = delta.square() + 1e-6
-    target = (numerator / denominator).clamp(0.0, 1.0)
-    target = torch.nan_to_num(
-        target,
-        nan=0.5,
-        posinf=1.0,
-        neginf=0.0,
-    )
-
-    gate_v = torch.nan_to_num(
-        gate1[valid].float(),
-        nan=0.5,
-        posinf=1.0,
-        neginf=0.0,
-    ).clamp(0.0, 1.0)
-    target_v = target[valid].float()
-
-    mae = torch.mean(torch.abs(gate_v - target_v))
-
-    gate_centered = gate_v - gate_v.mean()
-    target_centered = target_v - target_v.mean()
-    denom = torch.sqrt(
-        torch.sum(gate_centered.square())
-        * torch.sum(target_centered.square())
-    )
-    if float(denom.item()) > 1e-12:
-        corr = torch.sum(gate_centered * target_centered) / denom
-        corr_value = float(corr.item())
-    else:
-        corr_value = float('nan')
-
-    return {
-        'target_mean': float(target_v.mean().item()),
-        'target_std': float(target_v.std(unbiased=False).item()),
-        'mae': float(mae.item()),
-        'corr': corr_value,
-        'valid_pixels': int(target_v.numel()),
-    }
+    oracle = first_gate_oracle(aux, gt_depth, args.min_depth, args.max_depth,
+                              args.gate_min_delta)
+    stats = OracleAccumulator()
+    stats.update(oracle)
+    return stats.compute()
 
 
 def _gate_iteration_means(aux, max_iters=3):
@@ -436,97 +359,10 @@ def _gate_iteration_means(aux, max_iters=3):
     return means
 
 
-def compute_gate_utility_loss(aux, gt_depth, args, tau):
-    """Oracle interpolation supervision for Phase-A GeometryGate.
-
-    For the first MaGNet refinement step:
-        mu_gate = mu_mono + g * (mu_mv - mu_mono)
-
-    The least-squares optimal per-pixel interpolation coefficient is:
-        g* = ((gt - mu_mono) * delta) / (delta^2 + eps)
-    clipped to [0, 1], where delta = mu_mv - mu_mono.
-
-    This directly matches the semantics of GeometryGate. Pixels for which
-    the frozen MV proposal is nearly identical to the monocular prior are
-    ignored because the gate is unidentifiable there.
-    """
-    gates = aux.get('geometry_gate')
-    ungated = aux.get('ungated_gmm')
-    mono_gmm = aux.get('mono_gmm')
-
-    if not isinstance(gates, (list, tuple)) or not gates:
-        raise RuntimeError('aux[geometry_gate] must be a non-empty list')
-    if not isinstance(ungated, (list, tuple)) or not ungated:
-        raise RuntimeError('aux[ungated_gmm] must be a non-empty list')
-    if mono_gmm is None:
-        raise RuntimeError('aux[mono_gmm] is required')
-
-    # Phase-A warm-up supervises the first refinement only. At this step
-    # the base prediction is exactly the frozen monocular Gaussian, which
-    # avoids target feedback from already-gated later iterations.
-    gate = gates[0]
-    raw_mv = ungated[0]
-
-    mono_mu = mono_gmm[:, :1].detach()
-    raw_mv_mu = raw_mv[:, :1].detach()
-
-    gt_low = F.interpolate(
-        gt_depth,
-        size=gate.shape[-2:],
-        mode='nearest',
-    )
-
-    delta = raw_mv_mu - mono_mu
-
-    valid = (
-        (gt_low > args.min_depth)
-        & (gt_low < args.max_depth)
-        & torch.isfinite(gt_low)
-        & torch.isfinite(mono_mu)
-        & torch.isfinite(raw_mv_mu)
-        # If the MV proposal barely moves relative to mono, the gate has
-        # almost no observable effect and should not be supervised.
-        & (torch.abs(delta) > args.gate_min_delta)
-    )
-
-    if not torch.any(valid):
-        raise RuntimeError('No valid pixels for oracle gate supervision')
-
-    with torch.no_grad():
-        numerator = (gt_low - mono_mu) * delta
-        denominator = delta.square() + 1e-6
-
-        target = (numerator / denominator).clamp(0.0, 1.0)
-        target = torch.nan_to_num(
-            target,
-            nan=0.5,
-            posinf=1.0,
-            neginf=0.0,
-        )
-
-    # The target is an interpolation coefficient rather than a Bernoulli
-    # label, so Smooth-L1 is a better fit than BCE for Phase-A warm-up.
-    with torch.cuda.amp.autocast(enabled=False):
-        gate_fp32 = torch.nan_to_num(
-            gate[valid].float(),
-            nan=0.5,
-            posinf=1.0,
-            neginf=0.0,
-        ).clamp(0.0, 1.0)
-
-        target_fp32 = target[valid].float()
-
-        loss_gate = F.smooth_l1_loss(
-            gate_fp32,
-            target_fp32,
-            beta=0.1,
-        )
-
-    target_mean = target_fp32.mean()
-    target_std = target_fp32.std(unbiased=False)
-
-    return loss_gate, target_mean, target_std
-
+def compute_gate_utility_loss(aux, gt_depth, args, tau=None):
+    """Compatibility wrapper; tau is unused by the interpolation oracle."""
+    return oracle_loss(first_gate_oracle(
+        aux, gt_depth, args.min_depth, args.max_depth, args.gate_min_delta))
 
 
 def stable_magnet_loss(pred_list, gt_depth, min_depth, max_depth, gamma):
@@ -624,9 +460,13 @@ def depth_metrics(pred, gt, min_depth, max_depth):
     if not torch.any(valid):
         return None
 
-    p = pred_mu[valid].clamp(min=min_depth, max=max_depth)
-    g = gt[valid]
-    sigma = pred_sigma[valid].clamp_min(1e-6)
+    if not torch.isfinite(pred_mu[valid]).all() or not torch.isfinite(pred_sigma[valid]).all():
+        raise RuntimeError('Non-finite depth prediction on valid GT during validation')
+    if (pred_sigma[valid] <= 0).any():
+        raise RuntimeError('Non-positive Gaussian sigma during validation')
+    p = pred_mu[valid].float().clamp(min=min_depth, max=max_depth)
+    g = gt[valid].float()
+    sigma = pred_sigma[valid].float().clamp_min(1e-6)
 
     rmse = torch.sqrt(torch.mean((p - g) ** 2))
     abs_rel = torch.mean(torch.abs(p - g) / g.clamp_min(1e-6))
@@ -653,6 +493,10 @@ def depth_metrics(pred, gt, min_depth, max_depth):
 def append_csv(path, fieldnames, row):
     path.parent.mkdir(parents=True, exist_ok=True)
     exists = path.exists()
+    if exists and path.stat().st_size:
+        with path.open(newline='') as f:
+            if next(csv.reader(f)) != list(fieldnames):
+                raise ValueError(f'CSV schema mismatch: {path}. Use a new output directory.')
     with path.open('a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         if not exists:
@@ -660,7 +504,24 @@ def append_csv(path, fieldnames, row):
         writer.writerow(row)
 
 
-def save_gate_checkpoint(path, model, optimizer, epoch, step, metrics, args):
+VALIDATION_PROTOCOL = 'scene-balanced-pixel-oracle-v1'
+
+
+def resume_best_score(ckpt, args):
+    """Scores from the former Chess-prefix validation are not comparable."""
+    if ckpt.get('validation_protocol') != VALIDATION_PROTOCOL:
+        return None
+    previous = ckpt.get('args', {})
+    fields = ('dataset_root', 'scenes', 'val_sequences', 'frame_stride',
+              'window_radius', 'num_source_views', 'num_test_iter',
+              'val_max_samples', 'min_depth', 'max_depth', 'gate_min_delta')
+    if any(previous.get(key) != getattr(args, key, None) for key in fields):
+        return None
+    return ckpt.get('best_score')
+
+
+def save_gate_checkpoint(path, model, optimizer, epoch, step, metrics, args,
+                         best_score=None, scaler=None):
     """Small checkpoint: only the trainable GeometryGate + optimizer state."""
     path.parent.mkdir(parents=True, exist_ok=True)
     gate_state = {
@@ -674,6 +535,10 @@ def save_gate_checkpoint(path, model, optimizer, epoch, step, metrics, args):
             'epoch': epoch,
             'step': step,
             'metrics': metrics,
+            'best_score': best_score,
+            'scaler': scaler.state_dict() if scaler is not None else None,
+            'stage': 'stage1a-first-gate-oracle',
+            'validation_protocol': VALIDATION_PROTOCOL,
             'args': vars(args),
         },
         path,
@@ -698,119 +563,74 @@ def load_gate_checkpoint(path, model, optimizer=None):
     return ckpt
 
 
+ORACLE_DIAG_FIELDS = [
+    'oracle_valid_pixels', 'oracle_valid_fraction', 'oracle_empty_samples',
+    'mono_rmse_low', 'mv_rmse_low', 'fused_rmse_low', 'oracle_rmse_low',
+    'target_closed_fraction', 'target_open_fraction',
+]
+
+
 def validate(model, loader, device, args, fixed_deg, max_samples):
     model.eval()
-
-    totals = {
-        'rmse': 0.0,
-        'abs_rel': 0.0,
-        'a1': 0.0,
-        'nll': 0.0,
-        # Keep gate_mean as the LAST iteration for backward compatibility
-        # with the earlier val.csv format.
-        'gate_mean': 0.0,
-        'gate1_mean': 0.0,
-        'gate2_mean': 0.0,
-        'gate3_mean': 0.0,
-        'gate_target_mean': 0.0,
-        'gate_target_std': 0.0,
-        'gate_target_mae': 0.0,
-        'forward_ms': 0.0,
-    }
-    corr_sum = 0.0
-    corr_count = 0
+    totals = dict.fromkeys(('rmse', 'abs_rel', 'a1', 'nll', 'gate_mean',
+                            'gate1_mean', 'gate2_mean', 'gate3_mean', 'forward_ms'), 0.0)
+    stats = OracleAccumulator()
     count = 0
-
     with torch.no_grad():
-        for batch_idx, (data_array, cam_intrins) in enumerate(loader):
+        for data_array, cam_intrins in loader:
             if max_samples > 0 and count >= max_samples:
                 break
-
-            cur_batch_size = data_array[0]['img'].shape[0]
-            ref_dat, nghbr_dats, nghbr_poses, is_valid = utils.data_preprocess(
-                data_array,
-                cur_batch_size,
-            )
-
-            ref_img = ref_dat['img'].to(device, non_blocking=True)
+            batch_size = data_array[0]['img'].shape[0]
+            ref_dat, neighbors, poses, is_valid = utils.data_preprocess(data_array, batch_size)
+            ref = ref_dat['img'].to(device, non_blocking=True)
             gt = ref_dat['gt_dmap'].to(device, non_blocking=True)
-            nghbr_imgs = torch.cat(
-                [d['img'].to(device, non_blocking=True) for d in nghbr_dats],
-                dim=0,
-            )
-            poses = nghbr_poses.to(device, non_blocking=True)
-
-            noisy_poses, rot_unc, _ = fixed_validation_rotation_noise(
-                poses,
-                fixed_deg,
-            )
-
+            src = torch.cat([d['img'].to(device, non_blocking=True) for d in neighbors], dim=0)
+            poses = poses.to(device, non_blocking=True)
+            noisy, rot_unc, _ = fixed_validation_rotation_noise(poses, fixed_deg)
             if device.type == 'cuda':
                 torch.cuda.synchronize()
-            t0 = time.perf_counter()
-
-            pred_list, aux = model(
-                ref_img,
-                nghbr_imgs,
-                noisy_poses,
-                is_valid,
-                cam_intrins,
-                mode='test',
-                rot_unc=rot_unc,
-                return_aux=True,
-            )
-
+            start = time.perf_counter()
+            preds, aux = model(ref, src, noisy, is_valid, cam_intrins,
+                               mode='test', rot_unc=rot_unc, return_aux=True)
             if device.type == 'cuda':
                 torch.cuda.synchronize()
-            elapsed_ms = (time.perf_counter() - t0) * 1000.0
-
-            metrics = depth_metrics(
-                pred_list[-1],
-                gt,
-                args.min_depth,
-                args.max_depth,
-            )
-            if metrics is None:
-                continue
-
-            gates = aux.get('geometry_gate')
-            if not isinstance(gates, (list, tuple)) or not gates:
-                raise RuntimeError('aux[geometry_gate] must be a non-empty list')
-
-            gate_last = gates[-1]
-            gate_means = _gate_iteration_means(aux, max_iters=3)
-            oracle = compute_gate_oracle_diagnostics(aux, gt, args)
-
-            for key in ('rmse', 'abs_rel', 'a1', 'nll'):
-                totals[key] += metrics[key]
-
-            totals['gate_mean'] += float(gate_last.mean().item())
-            totals['gate1_mean'] += gate_means[0]
-            totals['gate2_mean'] += gate_means[1]
-            totals['gate3_mean'] += gate_means[2]
-            totals['gate_target_mean'] += oracle['target_mean']
-            totals['gate_target_std'] += oracle['target_std']
-            totals['gate_target_mae'] += oracle['mae']
-            totals['forward_ms'] += elapsed_ms
-
-            if math.isfinite(oracle['corr']):
-                corr_sum += oracle['corr']
-                corr_count += 1
-
-            count += 1
-
-    if count == 0:
+            per_sample_ms = (time.perf_counter() - start) * 1000.0 / batch_size
+            # Metrics remain mean per-image metrics, independent of loader batch size.
+            for i in range(batch_size):
+                if max_samples > 0 and count >= max_samples:
+                    break
+                metrics = depth_metrics(preds[-1][i:i+1], gt[i:i+1],
+                                        args.min_depth, args.max_depth)
+                if metrics is None:
+                    continue
+                sample_aux = {}
+                for key in ('geometry_gate', 'ungated_gmm', 'geometry_valid'):
+                    if key in aux:
+                        sample_aux[key] = [v[i:i+1] for v in aux[key]]
+                sample_aux['mono_gmm'] = aux['mono_gmm'][i:i+1]
+                stats.update(first_gate_oracle(sample_aux, gt[i:i+1], args.min_depth,
+                                               args.max_depth, args.gate_min_delta))
+                means = _gate_iteration_means(sample_aux)
+                for key, value in metrics.items():
+                    totals[key] += value
+                totals['gate_mean'] += float(sample_aux['geometry_gate'][-1].mean().item())
+                for j in range(3):
+                    totals[f'gate{j+1}_mean'] += means[j]
+                totals['forward_ms'] += per_sample_ms
+                count += 1
+    if not count:
         raise RuntimeError('Validation produced zero valid samples')
-
-    result = {
-        key: value / count
-        for key, value in totals.items()
-    }
-    result['gate_target_corr'] = (
-        corr_sum / corr_count if corr_count > 0 else float('nan')
-    )
-    result['samples'] = count
-    result['noise_deg'] = float(fixed_deg)
+    result = {key: value/count for key, value in totals.items()}
+    oracle = stats.compute()
+    for key in ('mean', 'std', 'mae', 'corr'):
+        source = 'target_'+key if key in ('mean', 'std') else key
+        result['gate_target_'+key] = oracle[source]
+    result.update(oracle_valid_pixels=oracle['valid_pixels'],
+                  oracle_valid_fraction=oracle['valid_fraction'],
+                  oracle_empty_samples=oracle['empty_samples'])
+    for key in ORACLE_DIAG_FIELDS[3:]:
+        result[key] = oracle[key]
+    result.update(samples=count, noise_deg=float(fixed_deg))
     return result
 
 
@@ -848,6 +668,18 @@ def _validate_phase_a_args(args):
             + ", ".join(missing)
             + ". Check argparse definitions and CLI propagation."
         )
+
+    positive = ('lr', 'lambda_gate', 'gate_min_delta', 'batch_size', 'epochs',
+                'num_train_iter', 'num_test_iter', 'grad_clip')
+    for name in positive:
+        if not math.isfinite(getattr(args, name)) or getattr(args, name) <= 0:
+            raise ValueError(f'{name} must be finite and positive')
+    if not 0 < args.min_depth < args.max_depth or not math.isfinite(args.max_depth):
+        raise ValueError('Expected finite 0 < min_depth < max_depth')
+    if args.num_source_views <= 0 or args.num_source_views % 2:
+        raise ValueError('num_source_views must be a positive even number')
+    if args.val_max_samples < 0 or args.max_train_steps < 0:
+        raise ValueError('sample and step limits must be non-negative')
 
 
 def _print_phase_a_args(args):
@@ -898,12 +730,15 @@ def train(cli):
     print('gate lr          :', cli.lr)
     print('lambda gate      :', cli.lambda_gate)
     print('gate target tau  :', cli.gate_tau, '(unused by current oracle coefficient)')
+    print('rotation input   : oracle injected angle (radians), not estimated covariance')
     print('device           :', torch.cuda.get_device_name(0))
 
-    train_loader = SevenScenesTrainLoader(args, 'train').data
-    val_loader = SevenScenesTrainLoader(args, 'val').data
+    train_loader = None if cli.eval_only else SevenScenesTrainLoader(args, 'train').data
+    val_args = SimpleNamespace(**vars(args))
+    val_args.batch_size = 1
+    val_loader = SevenScenesTrainLoader(val_args, 'val').data
 
-    print('train samples    :', len(train_loader.dataset))
+    print('train samples    :', len(train_loader.dataset) if train_loader is not None else 'not loaded (eval-only)')
     print('val samples      :', len(val_loader.dataset))
 
     model = STRUCTMAGNET(args).to(device)
@@ -928,9 +763,12 @@ def train(cli):
         ckpt = load_gate_checkpoint(cli.resume, model, optimizer)
         start_epoch = int(ckpt.get('epoch', -1)) + 1
         global_step = int(ckpt.get('step', 0))
-        metrics = ckpt.get('metrics', {})
-        if isinstance(metrics, dict):
-            resumed_best_score = metrics.get('score')
+        resumed_best_score = resume_best_score(ckpt, cli)
+        if resumed_best_score is None:
+            print('validation protocol/settings changed or historical best unavailable; '
+                  'resetting selection score while restoring gate and optimizer')
+        if ckpt.get('scaler') is not None:
+            scaler.load_state_dict(ckpt['scaler'])
         print('resumed gate checkpoint:', cli.resume)
         print('resume epoch      :', start_epoch)
 
@@ -941,7 +779,7 @@ def train(cli):
     train_fields = [
         'epoch', 'step', 'loss_total', 'loss_depth', 'loss_gate',
         'gate_mean', 'gate_std', 'gate_target_mean', 'gate_target_std',
-        'noise_mean_deg', 'lr',
+        'noise_mean_deg', 'lr', 'oracle_valid_pixels', 'oracle_valid_fraction',
     ]
     val_fields = [
         'epoch', 'noise_deg', 'samples', 'rmse', 'abs_rel', 'a1',
@@ -991,8 +829,9 @@ def train(cli):
             'gate_mean', 'gate1_mean', 'gate2_mean', 'gate3_mean',
             'gate_target_mean', 'gate_target_std',
             'gate_target_mae', 'gate_target_corr', 'forward_ms',
-        ]
-        # Rewrite this small diagnostic file on every eval-only run.
+        ] + ORACLE_DIAG_FIELDS
+        val_diag_csv = log_dir / 'eval_diagnostics.csv'
+        # This is separate from epoch diagnostics.
         if val_diag_csv.exists():
             val_diag_csv.unlink()
         for result in eval_results:
@@ -1019,6 +858,7 @@ def train(cli):
             'noise_deg': 0.0,
         }
         running_count = 0
+        skipped_oracle_batches = 0
 
         pbar = tqdm(
             train_loader,
@@ -1042,10 +882,6 @@ def train(cli):
             gt = gt.clone()
             gt[~torch.isfinite(gt)] = 0.0
             gt[gt > args.max_depth] = 0.0
-            gt_mask = (
-                (gt > args.min_depth)
-                & (gt < args.max_depth)
-            )
 
             nghbr_imgs = torch.cat(
                 [d['img'].to(device, non_blocking=True) for d in nghbr_dats],
@@ -1067,25 +903,18 @@ def train(cli):
                     return_aux=True,
                 )
 
+            oracle = first_gate_oracle(aux, gt, args.min_depth, args.max_depth,
+                                      args.gate_min_delta)
+            oracle_pixels = int(oracle['valid'].sum().item())
+            if not oracle_pixels:
+                skipped_oracle_batches += 1
+                continue  # Do not step AdamW on zero signal (including weight decay).
+            loss_gate, target_mean, target_std = oracle_loss(oracle)
+            with torch.no_grad():
                 loss_depth = stable_magnet_loss(
-                    pred_list,
-                    gt,
-                    min_depth=args.min_depth,
-                    max_depth=args.max_depth,
-                    gamma=args.loss_gamma,
-                )
-
-                loss_gate, target_mean, target_std = compute_gate_utility_loss(
-                    aux,
-                    gt,
-                    args,
-                    cli.gate_tau,
-                )
-
-                # Phase-A warm-up: optimize GeometryGate supervision only.
-                # Depth NLL is still computed/logged as a diagnostic and will
-                # return to the objective in the later gate-depth adaptation phase.
-                loss_total = cli.lambda_gate * loss_gate
+                    pred_list, gt, args.min_depth, args.max_depth, args.loss_gamma)
+            # Only gate[0] contributes gradients in Stage 1A.
+            loss_total = cli.lambda_gate * loss_gate
 
             if global_step == 0:
                 pred_dbg = pred_list[-1].detach()
@@ -1193,6 +1022,8 @@ def train(cli):
                 'gate_target_std': float(target_std.detach().item()),
                 'noise_mean_deg': noise_mean_deg,
                 'lr': optimizer.param_groups[0]['lr'],
+                'oracle_valid_pixels': oracle_pixels,
+                'oracle_valid_fraction': oracle_pixels / oracle['valid'].numel(),
             }
             append_csv(train_csv, train_fields, row)
 
@@ -1214,9 +1045,11 @@ def train(cli):
             )
 
         if running_count == 0:
-            raise RuntimeError('No training steps were executed')
+            raise RuntimeError('No optimizer steps: all batches lacked identifiable oracle pixels; '
+                               'check valid views, depth masks, and gate_min_delta')
 
         print('\n--- epoch train summary ---')
+        print('skipped empty oracle batches:', skipped_oracle_batches)
         print('loss_total       : %.6f' % (running['loss_total'] / running_count))
         print('loss_depth       : %.6f' % (running['loss_depth'] / running_count))
         print('loss_gate        : %.6f' % (running['loss_gate'] / running_count))
@@ -1310,7 +1143,7 @@ def train(cli):
             'gate_mean', 'gate1_mean', 'gate2_mean', 'gate3_mean',
             'gate_target_mean', 'gate_target_std',
             'gate_target_mae', 'gate_target_corr', 'forward_ms', 'score',
-        ]
+        ] + ORACLE_DIAG_FIELDS
 
         for val_result in (val_clean, val_rot5, val_rot8):
             base_row = {
@@ -1329,6 +1162,8 @@ def train(cli):
                 {key: base_row[key] for key in diag_fields},
             )
 
+        improved = score < best_score
+        best_score = min(best_score, score)
         save_gate_checkpoint(
             ckpt_dir / 'last_gate.pt',
             model,
@@ -1341,11 +1176,10 @@ def train(cli):
                 'rot8': val_rot8,
                 'score': score,
             },
-            cli,
+            cli, best_score=best_score, scaler=scaler,
         )
 
-        if score < best_score:
-            best_score = score
+        if improved:
             save_gate_checkpoint(
                 ckpt_dir / 'best_gate.pt',
                 model,
@@ -1358,12 +1192,13 @@ def train(cli):
                     'rot8': val_rot8,
                     'score': score,
                 },
-                cli,
+                cli, best_score=best_score, scaler=scaler,
             )
             print('saved new best gate checkpoint')
 
     print('\n[PASS] Phase-A training run completed.')
-    print('best gate checkpoint:', ckpt_dir / 'best_gate.pt')
+    best_path = ckpt_dir / 'best_gate.pt'
+    print('best gate checkpoint:', best_path if best_path.exists() else cli.resume)
     print('train log           :', train_csv)
     print('validation log      :', val_csv)
 
@@ -1392,7 +1227,8 @@ def main():
     parser.add_argument('--grad_clip', type=float, default=1.0)
     parser.add_argument('--loss_gamma', type=float, default=0.8)
     parser.add_argument('--lambda_gate', type=float, default=0.1)
-    parser.add_argument('--gate_tau', type=float, default=0.10)
+    parser.add_argument('--gate_tau', type=float, default=0.10,
+                        help='Deprecated compatibility option; unused by the interpolation oracle.')
     parser.add_argument(
         '--gate_min_delta',
         type=float,

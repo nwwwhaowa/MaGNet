@@ -1,3 +1,13 @@
+# StructMaGNet development
+
+当前分支阶段：**Stage 1A — GeometryGate oracle warm-up**。
+使用 `train_StructMaGNet.py`；`train_StructMaGNet_7scenes.py` 是旧版深度损失训练入口。
+
+开发状态、修正说明、测试命令与实验指引见 [docs/STAGE1A.md](docs/STAGE1A.md)。
+
+以下保留原始 MaGNet 的论文与使用说明。
+
+---
 
 # Multi-View Depth Estimation by Fusing Single-View Depth Probability with Multi-View Geometry
 
