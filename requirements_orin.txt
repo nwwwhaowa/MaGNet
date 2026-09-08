@@ -1,0 +1,10 @@
+# Jetson Orin / existing PyTorch environment dependencies.
+# IMPORTANT: Do not install torch or torchvision from this file.
+# Keep the Jetson-compatible PyTorch/CUDA build that is already working.
+
+Pillow
+numpy
+matplotlib
+tqdm
+glob2
+scipy
