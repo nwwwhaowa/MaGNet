@@ -5,6 +5,7 @@
 
 开发状态、修正说明、测试命令与实验指引见 [docs/STAGE1A.md](docs/STAGE1A.md)。
 门控输入诊断、固定系数/空间对照与初始化和损失消融见 [docs/GATE_AUDIT.md](docs/GATE_AUDIT.md)。
+完整V2架构、近期相关工作、训练阶段与必要对照见 [docs/STRUCTMAGNET_V2_DESIGN.md](docs/STRUCTMAGNET_V2_DESIGN.md)（研究设计草案，尚未实现）。
 
 以下保留原始 MaGNet 的论文与使用说明。
 
