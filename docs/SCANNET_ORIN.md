@@ -8,6 +8,40 @@ This branch adds a ScanNet Phase-A training path for StructMaGNet without changi
 - `data/dataloader_scannet_train.py`: strict train/val loader using frame-level split files.
 - `tools/scannet/export_sens_py3.py`: Python 3 streaming `.sens` exporter that can retain only every Nth frame.
 - `tools/scannet/build_scannet_frame_splits.py`: builds valid `<scene> <reference_frame>` train/val lists.
+- `requirements_orin.txt`: Orin-safe Python dependencies; intentionally excludes `torch` and `torchvision`.
+
+## Environment setup on Orin
+
+Do **not** install the repository's legacy `requirements.txt` on Jetson Orin because it pins old desktop PyTorch versions. Keep the already working Jetson-compatible PyTorch/CUDA environment and install only the missing Python packages:
+
+```bash
+python -m pip install -r requirements_orin.txt
+```
+
+If you only hit `ModuleNotFoundError: No module named 'scipy'`, the minimal fix is:
+
+```bash
+python -m pip install scipy
+```
+
+Then verify:
+
+```bash
+python - <<'PY'
+import torch
+import torchvision
+import scipy
+
+print('torch       :', torch.__version__)
+print('torchvision :', torchvision.__version__)
+print('scipy       :', scipy.__version__)
+print('cuda        :', torch.version.cuda)
+print('cuda avail  :', torch.cuda.is_available())
+if torch.cuda.is_available():
+    print('GPU         :', torch.cuda.get_device_name(0))
+print('environment : PASS')
+PY
+```
 
 ## 1 TB storage strategy
 
