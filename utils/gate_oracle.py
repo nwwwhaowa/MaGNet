@@ -60,19 +60,28 @@ def first_gate_oracle(aux, gt_depth, min_depth, max_depth, min_delta=0.01):
             'mono': mono, 'mv': mv, 'gt': gt}
 
 
-def oracle_loss(oracle):
+def oracle_loss(oracle, kind='smooth_l1'):
     """Smooth-L1 on identifiable pixels; empty masks return graph-connected zero.
 
     The caller must skip the optimizer step on an empty mask, because AdamW
     can change parameters via momentum/weight decay even with a zero gradient.
     """
+    if kind not in ('smooth_l1', 'mse', 'depth_mse'):
+        raise ValueError('Unknown gate loss: ' + kind)
     gate, target, valid = (oracle[k] for k in ('gate', 'target', 'valid'))
     if not valid.any():
         nan = gate.new_tensor(float('nan'))
         return gate.sum() * 0.0, nan, nan
     target_v = target[valid]
-    return (F.smooth_l1_loss(gate[valid], target_v, beta=0.1),
-            target_v.mean(), target_v.std(unbiased=False))
+    if kind == 'smooth_l1':
+        loss = F.smooth_l1_loss(gate[valid], target_v, beta=0.1)
+    elif kind == 'mse':
+        loss = F.mse_loss(gate[valid], target_v)
+    else:
+        fused = oracle['mono'][valid] + gate[valid] * (
+            oracle['mv'][valid] - oracle['mono'][valid])
+        loss = F.mse_loss(fused, oracle['gt'][valid])
+    return loss, target_v.mean(), target_v.std(unbiased=False)
 
 
 class OracleAccumulator:

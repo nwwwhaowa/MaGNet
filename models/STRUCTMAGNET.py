@@ -114,6 +114,7 @@ class STRUCTMAGNET(nn.Module):
         self.geometry_gate = GeometryGate(
             ch_in=4,
             hidden_dim=32,
+            init_bias=getattr(args, 'gate_init_bias', 4.0),
         )
 
         h_dim = 128
@@ -186,6 +187,7 @@ class STRUCTMAGNET(nn.Module):
         pred_low_list = [ref_gmms]
         gate_list = []
         entropy_list = []
+        gate_input_list = []
         peak_list = []
         ungated_gmm_list = []
         geometry_valid_list = []
@@ -301,6 +303,13 @@ class STRUCTMAGNET(nn.Module):
                               & torch.isfinite(raw_mv_gmm).all(dim=1, keepdim=True)
                               & (raw_sigma > 0))
             g_geo = torch.where(geometry_valid, g_geo, torch.zeros_like(g_geo))
+            policy = getattr(self, 'gate_policy', 'learned')
+            if policy != 'learned':
+                if self.training:
+                    raise RuntimeError('Gate policies are evaluation-only')
+                from utils.gate_audit import apply_gate_policy
+                g_geo = apply_gate_policy(g_geo, geometry_valid, policy,
+                                          getattr(self, 'gate_fixed_value', 0.5))
             # Sanitize invalid proposals BEFORE multiplication: 0*NaN is NaN.
             safe_mu = torch.where(geometry_valid, raw_mu, prev_mu)
             safe_sigma = torch.where(geometry_valid, raw_sigma, prev_sigma)
@@ -317,6 +326,8 @@ class STRUCTMAGNET(nn.Module):
             # IMPORTANT: append INSIDE the iterative refinement loop.
             pred_low_list.append(new_pred)
             gate_list.append(g_geo)
+            if return_aux:
+                gate_input_list.append(gate_input.detach())
             entropy_list.append(cost_entropy)
             peak_list.append(cost_peak)
             ungated_gmm_list.append(raw_mv_gmm.detach())
@@ -335,6 +346,7 @@ class STRUCTMAGNET(nn.Module):
         if return_aux:
             aux = {
                 'geometry_gate': gate_list,
+                'gate_input': gate_input_list,
                 'cost_entropy': entropy_list,
                 'cost_peak': peak_list,
                 'rot_unc': rot_unc,

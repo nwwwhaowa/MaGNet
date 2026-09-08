@@ -11,7 +11,8 @@ Stage goal:
         g_star = clamp((gt - mu_mono) / (mu_mv - mu_mono), 0, 1)
 
       on identifiable pixels, using only the first frozen ungated proposal.
-      Optimize Smooth-L1 on gate[0]; depth NLL is diagnostic only.
+      Optimize the selected first-step gate loss (default Smooth-L1);
+      depth NLL is diagnostic only.
     - Validate at fixed 0 deg, 5 deg and 8 deg rotation perturbations.
 - Report Gate iteration diagnostics and oracle-target alignment.
 - Support --eval_only to diagnose an existing gate checkpoint without training.
@@ -570,7 +571,7 @@ ORACLE_DIAG_FIELDS = [
 ]
 
 
-def validate(model, loader, device, args, fixed_deg, max_samples):
+def validate(model, loader, device, args, fixed_deg, max_samples, oracle_callback=None):
     model.eval()
     totals = dict.fromkeys(('rmse', 'abs_rel', 'a1', 'nll', 'gate_mean',
                             'gate1_mean', 'gate2_mean', 'gate3_mean', 'forward_ms'), 0.0)
@@ -604,12 +605,15 @@ def validate(model, loader, device, args, fixed_deg, max_samples):
                 if metrics is None:
                     continue
                 sample_aux = {}
-                for key in ('geometry_gate', 'ungated_gmm', 'geometry_valid'):
+                for key in ('geometry_gate', 'ungated_gmm', 'geometry_valid', 'gate_input'):
                     if key in aux:
                         sample_aux[key] = [v[i:i+1] for v in aux[key]]
                 sample_aux['mono_gmm'] = aux['mono_gmm'][i:i+1]
-                stats.update(first_gate_oracle(sample_aux, gt[i:i+1], args.min_depth,
-                                               args.max_depth, args.gate_min_delta))
+                sample_oracle = first_gate_oracle(sample_aux, gt[i:i+1], args.min_depth,
+                                                  args.max_depth, args.gate_min_delta)
+                stats.update(sample_oracle)
+                if oracle_callback is not None:
+                    oracle_callback(sample_oracle, sample_aux, count)
                 means = _gate_iteration_means(sample_aux)
                 for key, value in metrics.items():
                     totals[key] += value
@@ -680,11 +684,15 @@ def _validate_phase_a_args(args):
         raise ValueError('num_source_views must be a positive even number')
     if args.val_max_samples < 0 or args.max_train_steps < 0:
         raise ValueError('sample and step limits must be non-negative')
+    if not math.isfinite(getattr(args, 'gate_init_bias', 4.0)):
+        raise ValueError('gate_init_bias must be finite')
 
 
 def _print_phase_a_args(args):
     print(f"learning rate     : {args.lr}")
     print(f"lambda gate       : {args.lambda_gate}")
+    print(f"gate loss         : {getattr(args, 'gate_loss', 'smooth_l1')}")
+    print(f"fresh gate bias   : {getattr(args, 'gate_init_bias', 4.0)} (overridden by resume weights)")
     print(f"gate min delta    : {args.gate_min_delta}")
     print(f"max train steps   : {args.max_train_steps}")
     print(f"val max samples   : {args.val_max_samples}")
@@ -761,6 +769,11 @@ def train(cli):
     resumed_best_score = None
     if cli.resume:
         ckpt = load_gate_checkpoint(cli.resume, model, optimizer)
+        if not cli.eval_only:
+            old_args = ckpt.get('args', {})
+            for name, default in (('gate_init_bias', 4.0), ('gate_loss', 'smooth_l1')):
+                if old_args.get(name, default) != getattr(cli, name, default):
+                    raise ValueError(f'{name} differs from checkpoint; start a fresh ablation without --resume')
         start_epoch = int(ckpt.get('epoch', -1)) + 1
         global_step = int(ckpt.get('step', 0))
         resumed_best_score = resume_best_score(ckpt, cli)
@@ -791,6 +804,14 @@ def train(cli):
         if resumed_best_score is not None
         else float('inf')
     )
+
+    if getattr(cli, 'gate_audit', False):
+        if not cli.eval_only or not cli.resume:
+            raise ValueError('--gate_audit requires --eval_only and --resume')
+        from utils.gate_audit import run_gate_audit
+        run_gate_audit(model, val_loader, device, args, cli, validate,
+                       checkpoint_args=ckpt.get('args', {}))
+        return
 
     if cli.eval_only:
         if not cli.resume:
@@ -909,7 +930,8 @@ def train(cli):
             if not oracle_pixels:
                 skipped_oracle_batches += 1
                 continue  # Do not step AdamW on zero signal (including weight decay).
-            loss_gate, target_mean, target_std = oracle_loss(oracle)
+            loss_gate, target_mean, target_std = oracle_loss(
+                oracle, getattr(cli, 'gate_loss', 'smooth_l1'))
             with torch.no_grad():
                 loss_depth = stable_magnet_loss(
                     pred_list, gt, args.min_depth, args.max_depth, args.loss_gamma)
@@ -1227,6 +1249,14 @@ def main():
     parser.add_argument('--grad_clip', type=float, default=1.0)
     parser.add_argument('--loss_gamma', type=float, default=0.8)
     parser.add_argument('--lambda_gate', type=float, default=0.1)
+    parser.add_argument('--gate_init_bias', type=float, default=4.0,
+                        help='Fresh-run final gate bias: 4 preserves legacy; 0 starts at 0.5.')
+    parser.add_argument('--gate_loss', choices=['smooth_l1', 'mse', 'depth_mse'],
+                        default='smooth_l1')
+    parser.add_argument('--gate_audit', action='store_true',
+                        help='Evaluate first-step fixed/spatial/input controls; requires eval_only.')
+    parser.add_argument('--gate_audit_full', action='store_true',
+                        help='Also rerun all refinement iterations for each fixed/spatial policy.')
     parser.add_argument('--gate_tau', type=float, default=0.10,
                         help='Deprecated compatibility option; unused by the interpolation oracle.')
     parser.add_argument(
@@ -1268,6 +1298,10 @@ def main():
     )
 
     cli = parser.parse_args()
+    if cli.gate_audit_full and not cli.gate_audit:
+        parser.error('--gate_audit_full requires --gate_audit')
+    if cli.gate_audit and (not cli.eval_only or not cli.resume):
+        parser.error('--gate_audit requires --eval_only and --resume')
 
     for name, path in (
         ('D-Net', cli.dnet_ckpt),

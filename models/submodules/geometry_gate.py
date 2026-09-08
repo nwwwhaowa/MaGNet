@@ -110,8 +110,11 @@ class GeometryGate(nn.Module):
         3: rotation uncertainty
     """
 
-    def __init__(self, ch_in=4, hidden_dim=32):
+    def __init__(self, ch_in=4, hidden_dim=32, init_bias=4.0):
         super().__init__()
+        if not math.isfinite(init_bias):
+            raise ValueError('Gate initialization bias must be finite')
+        self.init_bias = float(init_bias)
 
         self.net = nn.Sequential(
             nn.Conv2d(
@@ -141,7 +144,7 @@ class GeometryGate(nn.Module):
         final_conv = self.net[-1]
 
         nn.init.zeros_(final_conv.weight)
-        nn.init.constant_(final_conv.bias, 4.0)
+        nn.init.constant_(final_conv.bias, self.init_bias)
 
     def forward(self, x):
         return torch.sigmoid(self.net(x))
