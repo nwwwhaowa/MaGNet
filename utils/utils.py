@@ -81,16 +81,23 @@ def data_preprocess(data_array, cur_batch_size):
     nghbr_extMs = [nghbr_dat['extM'] for nghbr_dat in nghbr_dats]  # list of (batch_size X 4 X 4)
     for i in range(cur_batch_size):
         ext_ref = ref_extM[i, :, :]
-        if torch.isnan(ext_ref.min()):
+        if not torch.isfinite(ext_ref).all():
             is_valid[i, :] = 0
         else:
+            # Stay in torch: NumPy 2.x may dispatch linalg.inv(Tensor) back
+            # to a Tensor, making torch.from_numpy(...) fail. Invert once.
+            try:
+                inv_ref = torch.inverse(ext_ref)
+            except RuntimeError:
+                is_valid[i, :] = 0
+                continue
             for j in range(num_views):
                 ext_nghbr = nghbr_extMs[j][i, :, :]
-                if torch.isnan(ext_nghbr.min()):
+                if not torch.isfinite(ext_nghbr).all():
                     is_valid[i, j] = 0
                 else:
-                    nghbr_pose = ext_nghbr.mm(torch.from_numpy(np.linalg.inv(ext_ref)))
-                    if torch.isnan(nghbr_pose.min()):
+                    nghbr_pose = ext_nghbr.mm(inv_ref)
+                    if not torch.isfinite(nghbr_pose).all():
                         is_valid[i, j] = 0
                     else:
                         nghbr_poses[i, j, :, :] = nghbr_pose
@@ -330,4 +337,3 @@ def visualize_MaG(args, img, gt_dmap, gt_dmap_mask, pred_list, total_iter):
         # pred stdev
         target_path = '%s/%08d_pred_stdev_iter%02d.jpg' % (args.exp_vis_dir, total_iter, i)
         plt.imsave(target_path, pred_stdev, vmin=0.0, vmax=e_max, cmap='Reds')
-

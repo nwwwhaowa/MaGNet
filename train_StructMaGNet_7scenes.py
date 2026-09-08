@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Phase-A training for StructMaGNet on Chess + Office from 7-Scenes.
+"""Legacy depth-loss gate training on Chess + Office (NOT Stage 1A oracle).
+
+For the current Stage 1A first-step oracle warm-up, use train_StructMaGNet.py.
+This older entry point is retained to reproduce earlier depth-loss experiments.
 
 Goal:
   - load the official MaGNet checkpoint into STRUCTMAGNET;
@@ -323,6 +326,8 @@ def validate(model, loader, args, device, fixed_noise_deg, save_dir=None, epoch=
 
 
 def train(args):
+    print('[LEGACY] This optimizes depth NLL, not the Stage 1A oracle target. '
+          'Current warm-up entry point: train_StructMaGNet.py')
     seed_everything(args.seed)
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
