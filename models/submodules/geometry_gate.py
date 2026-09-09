@@ -8,16 +8,18 @@ import torch.nn.functional as F
 def cost_volume_statistics(cost_volume, eps=1e-8):
     """
     Args:
-        cost_volume: [B, D, H, W]
+        cost_volume: [B, D, H, W], MaGNet similarity scores (higher is better)
 
     Returns:
         entropy: [B, 1, H, W], normalized to [0, 1]
         peak:    [B, 1, H, W]
     """
-    prob = F.softmax(cost_volume, dim=1)
-
+    # FP16 rounds tiny probabilities/eps to zero; 0*log(0) is then NaN.
+    # Keep the original similarity sign, rather than treating scores as costs.
+    log_prob = F.log_softmax(cost_volume.float(), dim=1)
+    prob = log_prob.exp()
     entropy = -torch.sum(
-        prob * torch.log(prob + eps),
+        prob * log_prob,
         dim=1,
         keepdim=True,
     )
@@ -32,7 +34,7 @@ def cost_volume_statistics(cost_volume, eps=1e-8):
         keepdim=True,
     )[0]
 
-    return entropy, peak
+    return entropy.clamp(0.0, 1.0), peak
 
 
 def rotation_uncertainty_map(
@@ -108,8 +110,11 @@ class GeometryGate(nn.Module):
         3: rotation uncertainty
     """
 
-    def __init__(self, ch_in=4, hidden_dim=32):
+    def __init__(self, ch_in=4, hidden_dim=32, init_bias=4.0):
         super().__init__()
+        if not math.isfinite(init_bias):
+            raise ValueError('Gate initialization bias must be finite')
+        self.init_bias = float(init_bias)
 
         self.net = nn.Sequential(
             nn.Conv2d(
@@ -139,7 +144,7 @@ class GeometryGate(nn.Module):
         final_conv = self.net[-1]
 
         nn.init.zeros_(final_conv.weight)
-        nn.init.constant_(final_conv.bias, 4.0)
+        nn.init.constant_(final_conv.bias, self.init_bias)
 
     def forward(self, x):
         return torch.sigmoid(self.net(x))

@@ -61,7 +61,7 @@ class GNET(nn.Module):
     def predict_params(self, cost_volume):
         """Return original MaGNet normalized mean residual and sigma scale."""
         d_output = self.gnet(cost_volume)
-        mu_res, sigma_raw = torch.split(d_output, 1, dim=1)
+        mu_res, sigma_raw = torch.split(d_output.float(), 1, dim=1)
         sigma_scale = F.elu(sigma_raw) + 1.0 + 1e-10
         return mu_res, sigma_scale
 
@@ -114,6 +114,9 @@ class STRUCTMAGNET(nn.Module):
             ch_in=4,
             hidden_dim=32,
         )
+        self.gate_mode = getattr(args, 'gate_mode', 'learned')
+        if self.gate_mode not in ('learned', 'off'):
+            raise ValueError('gate_mode must be learned or off')
 
         h_dim = 128
         self.mask_head = nn.Sequential(
@@ -163,7 +166,7 @@ class STRUCTMAGNET(nn.Module):
             mono_gmms, x_d3 = self.d_net(
                 torch.cat((ref_img, nghbr_imgs), dim=0)
             )
-            mono_gmms = mono_gmms.detach()
+            mono_gmms = mono_gmms.detach().float()
 
             ref_gmms = mono_gmms[:B, ...]
             _, mono_sigma = torch.split(ref_gmms, 1, dim=1)
@@ -187,6 +190,9 @@ class STRUCTMAGNET(nn.Module):
         entropy_list = []
         peak_list = []
         ungated_gmm_list = []
+        geometry_valid_list = []
+        update_list = []
+        has_source = is_valid.to(ref_gmms.device).eq(1).any(dim=1).view(B, 1, 1, 1)
 
         n_iter = self.train_iter if mode == 'train' else self.test_iter
 
@@ -245,7 +251,7 @@ class STRUCTMAGNET(nn.Module):
                 dim=1,
             )
 
-            # Frozen original MaGNet proposal.
+            # Original MaGNet proposal; trainability is controlled by the trainer.
             mu_res, sigma_scale = self.g_net.predict_params(
                 gnet_input
             )
@@ -286,26 +292,20 @@ class STRUCTMAGNET(nn.Module):
                 neginf=-20.0,
             )
 
-            g_geo = self.geometry_gate(gate_input)
-
-            # GeometryGate is probability-valued. Keep it finite and away
-            # from exact 0/1 for numerically stable BCE supervision.
-            g_geo = torch.nan_to_num(
-                g_geo,
-                nan=0.5,
-                posinf=1.0,
-                neginf=0.0,
-            ).clamp(1e-6, 1.0 - 1e-6)
-
-            # Reliability-aware Gaussian update.
-            mu_new = (
-                prev_mu
-                + g_geo * mu_res * prev_sigma
-            )
-            sigma_new = prev_sigma * (
-                (1.0 - g_geo)
-                + g_geo * sigma_scale
-            )
+            g_geo = (self.geometry_gate(gate_input).float()
+                     if self.gate_mode == 'learned' else torch.ones_like(prev_mu))
+            # Pose availability and finite proposals are necessary support;
+            # this is not a per-pixel occlusion/visibility estimator.
+            geometry_valid = (has_source
+                              & torch.isfinite(cost_volume).all(dim=1, keepdim=True)
+                              & torch.isfinite(raw_mv_gmm).all(dim=1, keepdim=True)
+                              & (raw_sigma > 0))
+            g_geo = torch.where(geometry_valid, g_geo, torch.zeros_like(g_geo))
+            # Sanitize before multiplication: zero times NaN is still NaN.
+            safe_mu = torch.where(geometry_valid, raw_mu, prev_mu)
+            safe_sigma = torch.where(geometry_valid, raw_sigma, prev_sigma)
+            mu_new = prev_mu + g_geo * (safe_mu - prev_mu)
+            sigma_new = (1.0 - g_geo) * prev_sigma + g_geo * safe_sigma
 
             new_pred = torch.cat(
                 [mu_new, sigma_new],
@@ -318,6 +318,8 @@ class STRUCTMAGNET(nn.Module):
             entropy_list.append(cost_entropy)
             peak_list.append(cost_peak)
             ungated_gmm_list.append(raw_mv_gmm.detach())
+            geometry_valid_list.append(geometry_valid.detach())
+            update_list.append((mu_new - prev_mu).detach())
 
         mask = self.mask_head(x_d3)
         pred_list = [
@@ -338,6 +340,8 @@ class STRUCTMAGNET(nn.Module):
                 'mono_gmm': ref_gmms,
                 # Original MaGNet proposal before GeometryGate at each iteration.
                 'ungated_gmm': ungated_gmm_list,
+                'geometry_valid': geometry_valid_list,
+                'depth_update': update_list,
                 # Useful for debugging / future losses.
                 'gated_gmm_lowres': pred_low_list[1:],
             }

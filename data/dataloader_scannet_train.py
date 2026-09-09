@@ -26,6 +26,12 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision import transforms
 
 
+def seed_worker(worker_id):
+    seed = torch.initial_seed() % (2 ** 32)
+    random.seed(seed)
+    np.random.seed(seed)
+
+
 def _read_extm_from_txt(path):
     mat = np.loadtxt(path, dtype=np.float64)
     if mat.shape != (4, 4):
@@ -84,7 +90,10 @@ class ScannetTrainLoader:
                 pin_memory=getattr(args, "pin_memory", False),
                 drop_last=True,
                 sampler=self.train_sampler,
-                persistent_workers=(args.num_workers > 0),
+                persistent_workers=(args.num_workers > 0 and
+                                    getattr(args, 'persistent_workers', True)),
+                generator=getattr(args, 'loader_generator', None),
+                worker_init_fn=seed_worker,
             )
         elif mode == "val":
             self.train_sampler = None

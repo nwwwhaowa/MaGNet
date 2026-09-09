@@ -116,6 +116,13 @@ You should get the following results:
 |KITTI (eigen)|0.0535|0.9995|0.1623|2.1584|0.0826|0.0566|0.0235|7.4645|0.9714|0.9958|0.9990|1.8053|
 |KITTI (official)|0.0503|0.9135|0.1667|1.9707|0.0848|0.2423|0.0219|7.9451|0.9769|0.9941|0.9979|1.4750|
 
+## 二次训练：ScanNet
+
+This branch provides depth-supervised ScanNet retraining with a single shared
+geometry gate, mixed clean/perturbed rotations, and A/B/C ablation switches.
+See [二次训练 instructions](docs/SECOND_TRAINING.md) for training, evaluation,
+checkpoint recovery and the distinction from the earlier oracle gate warm-up.
+
 ## Training scripts
 
 If you wish to train the models, run

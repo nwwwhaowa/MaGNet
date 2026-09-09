@@ -1,10 +1,12 @@
 # ScanNet training on Jetson Orin (1 TB storage)
 
-This branch adds a ScanNet Phase-A training path for StructMaGNet without changing the validated 7-Scenes training script.
+This guide covers ScanNet preparation and Orin setup. On the `二次训练` branch,
+the ScanNet trainer uses direct depth supervision. See
+[SECOND_TRAINING.md](SECOND_TRAINING.md) for the current training and ablation protocol.
 
 ## Added files
 
-- `train_StructMaGNet_scannet.py`: ScanNet Phase-A1 GeometryGate training.
+- `train_StructMaGNet_scannet.py`: ScanNet depth-supervised retraining.
 - `data/dataloader_scannet_train.py`: strict train/val loader using frame-level split files.
 - `tools/scannet/export_sens_py3.py`: Python 3 streaming `.sens` exporter that can retain only every Nth frame.
 - `tools/scannet/build_scannet_frame_splits.py`: builds valid `<scene> <reference_frame>` train/val lists.
@@ -128,7 +130,7 @@ python train_StructMaGNet_scannet.py \
   --num_workers 1 \
   --epochs 1 \
   --lr 1e-4 \
-  --lambda_gate 0.1 \
+  --gate_mode learned \
   --max_train_steps 10 \
   --val_max_samples 8 \
   --amp
@@ -153,17 +155,18 @@ If unified-memory pressure is high, keep `batch_size=1`, leave `--pin_memory` di
 
 If the full official ScanNet train split cannot fit on the 1 TB device, train MaGNet and all StructMaGNet ablations on the **same scene/frame subset** for fair comparisons.
 
-## Phase-A behavior
-
-The ScanNet trainer intentionally keeps the current Stage-A1 scientific setup unchanged:
+## Current training behavior
 
 ```text
 D-Net          frozen
 F-Net          frozen
-G-Net          frozen
+G-Net          trainable
+Upsampling     trainable
 GeometryGate   trainable
 translation    unchanged
 rotation noise online
 ```
 
-The gate oracle loss provides the Phase-A1 gradient; depth Gaussian NLL remains logged as a diagnostic.
+The existing Gaussian depth NLL optimizes G-Net, upsampling and the shared gate.
+There is no oracle gate loss, and injected noise angles are not supplied to the model.
+Old gate-only checkpoints cannot resume this training; use its `last.pt` or `best.pt`.
