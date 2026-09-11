@@ -11,3 +11,23 @@ __pycache__/
 *.bak
 *.bak_*
 *_local.txt
+
+# Local training outputs
+/exp/
+/ckpts/
+/checkpoints/
+/runs/
+/wandb/
+*.pt
+*.pth
+*.ckpt
+*.pth.tar
+
+# Python cache and local environment
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+.env.*
+!.env.example

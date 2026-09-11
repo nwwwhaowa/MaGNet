@@ -1,0 +1,314 @@
+日志目录：/home/li/26workspace/StructMaGNet/MaGNet/scannet_check_qjlvwd0y
+不会自动启动训练。原始 .sens 文件保持不变。
+执行：/home/li/venvs/structmagnet/bin/python -c import numpy; from PIL import Image
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0000_00/scene0000_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0000_00
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 5578
+  stride           : 5
+  retained frames  : 1116
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0000_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0000_01/scene0000_01.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0000_01
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 5920
+  stride           : 5
+  retained frames  : 1184
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0000_01
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0000_02/scene0000_02.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0000_02
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 6170
+  stride           : 5
+  retained frames  : 1234
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0000_02
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0001_00/scene0001_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0001_00
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1544
+  stride           : 5
+  retained frames  : 309
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0001_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0001_01/scene0001_01.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0001_01
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1288
+  stride           : 5
+  retained frames  : 258
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0001_01
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0002_00/scene0002_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0002_00
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 5193
+  stride           : 5
+  retained frames  : 1039
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0002_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0002_01/scene0002_01.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0002_01
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 7253
+  stride           : 5
+  retained frames  : 1451
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0002_01
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0003_00/scene0003_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0003_00
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1736
+  stride           : 5
+  retained frames  : 348
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0003_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0003_01/scene0003_01.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0003_01
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1674
+  stride           : 5
+  retained frames  : 335
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0003_01
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0003_02/scene0003_02.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0003_02
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1344
+  stride           : 5
+  retained frames  : 269
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0003_02
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0004_00/scene0004_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0004_00
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 929
+  stride           : 5
+  retained frames  : 186
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0004_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0005_00/scene0005_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0005_00
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1159
+  stride           : 5
+  retained frames  : 232
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0005_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0005_01/scene0005_01.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0005_01
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1450
+  stride           : 5
+  retained frames  : 290
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0005_01
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0006_00/scene0006_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0006_00
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 2160
+  stride           : 5
+  retained frames  : 432
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0006_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0006_01/scene0006_01.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0006_01
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 2155
+  stride           : 5
+  retained frames  : 431
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0006_01
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0006_02/scene0006_02.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0006_02
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 2674
+  stride           : 5
+  retained frames  : 535
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0006_02
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0007_00/scene0007_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0007_00
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1041
+  stride           : 5
+  retained frames  : 209
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0007_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0008_00/scene0008_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0008_00
+  sensor           : StructureSensor
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1038
+  stride           : 5
+  retained frames  : 208
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0008_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0009_00/scene0009_00.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0009_00
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 980
+  stride           : 5
+  retained frames  : 196
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0009_00
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0009_01/scene0009_01.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0009_01
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 920
+  stride           : 5
+  retained frames  : 184
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0009_01
+执行：/home/li/venvs/structmagnet/bin/python /home/li/26workspace/StructMaGNet/MaGNet/tools/scannet/export_sens_py3.py --sens /mnt/nvme/datasets/ScanNet/raw_sens/scans/scene0009_02/scene0009_02.sens --dataset_root /mnt/nvme/datasets/ScanNet --scans_dir scans --stride 5
+ScanNet .sens export complete
+  scene            : scene0009_02
+  sensor           : StructureSensor (calibrated)
+  color            : 1296x968 jpeg
+  depth            : 640x480 zlib_ushort
+  depth shift      : 1000.0
+  total frames     : 1103
+  stride           : 5
+  retained frames  : 221
+  output           : /mnt/nvme/datasets/ScanNet/scans/scene0009_02
+跳过未完成下载：scene0010_01
+跳过未完成下载：scene0011_00
+跳过未完成下载：scene0011_01
+train 场景覆盖：21/1201
+val 场景覆盖：0/312
+检查未通过：ValueError: val 没有成功导出的官方场景；请补充对应场景数据
+训练入口/配置文件（仅发现，未验证配置或权重）：
+README.md
+train_DNet.py
+train_FNet.py
+train_MaGNet.py
+train_StructMaGNet.py
+train_StructMaGNet_7scenes.py
+train_StructMaGNet_scannet.py
+data/dataloader_7scenes_train.py
+data/dataloader_scannet_train.py
+tests/test_retraining.py
+tools/README_HEADS.md
+tools/check_7scenes_train.py
+utils/retraining.py
+README.md:18: *We present **MaGNet** (**M**onocular **a**nd **G**eometric **Net**work), a novel framework for fusing single-view depth probability with multi-view geometry, to improve the accuracy, robustness and efficiency of multi-view depth estimation. For each frame, MaGNet estimates a single-view depth probability distribution, parameterized as a pixel-wise Gaussian. The distribution estimated for the reference frame is then used to sample per-pixel depth candidates. Such probabilistic sampling enables the network to achieve higher accuracy while evaluating fewer depth candidates. We also propose depth consistency weighting for the multi-view matching score, to ensure that the multi-view depth is consistent with the single-view predictions. The proposed method achieves state-of-the-art performance on ScanNet, 7-Scenes and KITTI. Qualitative evaluation demonstrates that our method is more robust against challenging artifacts such as texture-less/reflective surfaces and moving objects.*
+README.md:23: We evaluated MaGNet on ScanNet, 7-Scenes and KITTI
+README.md:25: ### ScanNet
+README.md:27: * In order to download ScanNet, you should submit an agreement to the Terms of Use. Please follow the instructions in [this link](http://kaldir.vc.in.tum.de/scannet_benchmark/documentation).
+README.md:30: >`/path/to/ScanNet` \
+README.md:31: >`/path/to/ScanNet/scans` \
+README.md:32: >`/path/to/ScanNet/scans/scene0000_00 ...` \
+README.md:33: >`/path/to/ScanNet/scans_test` \
+README.md:34: >`/path/to/ScanNet/scans_test/scene0707_00 ...` 
+README.md:53: >`/path/to/KITTI/train` \
+README.md:54: >`/path/to/KITTI/train/2011_09_26_drive_0001_sync ...` \
+README.md:58: ## Download model weights
+README.md:60: Download model weights by
+README.md:86: python test_DNet.py ./test_scripts/dnet/scannet.txt
+README.md:96: |ScanNet|0.1186|0.2070|0.0493|0.2708|0.1461|0.1086|0.0515|10.0098|0.8546|0.9703|0.9928|2.2352|
+README.md:104: python test_MaGNet.py ./test_scripts/magnet/scannet.txt
+README.md:114: |ScanNet|0.0810|0.1466|0.0302|0.2098|0.1101|0.1055|0.0351|8.7686|0.9298|0.9835|0.9946|0.1454|
+README.md:119: ## 二次训练：ScanNet
+README.md:121: This branch provides depth-supervised ScanNet retraining with a single shared
+README.md:123: See [二次训练 instructions](docs/SECOND_TRAINING.md) for training, evaluation,
+README.md:124: checkpoint recovery and the distinction from the earlier oracle gate warm-up.
+README.md:126: ## Training scripts
+README.md:128: If you wish to train the models, run
+README.md:131: python train_DNet.py ./test_scripts/dnet/{scannet, kitti_eigen, kitti_official}.txt
+README.md:132: python train_FNet.py ./test_scripts/dnet/{scannet, kitti_eigen, kitti_official}.txt
+README.md:133: python train_MaGNet.py ./test_scripts/dnet/{scannet, kitti_eigen, kitti_official}.txt
+tools/README_HEADS.md:12:     ├── TrainSplit.txt
+tools/README_HEADS.md:29: ## 2. Check checkpoints
+tools/README_HEADS.md:32: ls -lh ckpts/DNET_scannet.pt ckpts/FNET_scannet.pt ckpts/MAGNET_scannet.pt
+tools/README_HEADS.md:48:   --dnet_ckpt ./ckpts/DNET_scannet.pt \
+tools/README_HEADS.md:49:   --fnet_ckpt ./ckpts/FNET_scannet.pt \
+tools/README_HEADS.md:50:   --magnet_ckpt ./ckpts/MAGNET_scannet.pt \
+执行：nvidia-smi
+Fri Sep 11 14:44:42 2026
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 540.5.0                Driver Version: 540.5.0      CUDA Version: 12.6     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  Orin (nvgpu)                  N/A  | N/A              N/A |                  N/A |
+| N/A   N/A  N/A               N/A /  N/A | Not Supported        |     N/A          N/A |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|  No running processes found                                                           |
++---------------------------------------------------------------------------------------+
+执行：/home/li/venvs/structmagnet/bin/python -c import torch; print("PyTorch:", torch.__version__); print("CUDA:", torch.version.cuda); print("CUDA available:", torch.cuda.is_available()); print("GPU:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none"); raise SystemExit(0 if torch.cuda.is_available() else 1)
+PyTorch: 2.8.0
+CUDA: 12.6
+CUDA available: True
+GPU: Orin
+完成：成功导出 21，跳过 4，失败 0；退出码 1
+请提供这两个文件用于确定训练命令：/home/li/26workspace/StructMaGNet/MaGNet/scannet_check_qjlvwd0y/check.log 和 /home/li/26workspace/StructMaGNet/MaGNet/scannet_check_qjlvwd0y/report.json
